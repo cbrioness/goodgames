@@ -160,63 +160,104 @@ function Shelf({ title, accent, count, empty, children }) {
 function SoundButton() {
   const audioRef = useRef(null)
   const wantSound = useRef(true)
+  const started = useRef(false)
   const [on, setOn] = useState(true)
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
+    let cancelled = false
+    let removeGesture = () => {}
 
     const tryPlay = () => {
-      if (!wantSound.current) return
-      const pending = audio.play()
-      if (!pending) return
-      pending.catch(() => {})
+      if (cancelled || !wantSound.current) return Promise.resolve(false)
+      return audio
+        .play()
+        .then(() => {
+          if (cancelled || !wantSound.current) {
+            audio.pause()
+            started.current = false
+            return false
+          }
+          started.current = true
+          return true
+        })
+        .catch(() => {
+          started.current = false
+          return false
+        })
     }
 
-    const onGesture = (event) => {
-      const target = event.target
-      if (target instanceof Element && target.closest('[data-sound-toggle]')) return
-      tryPlay()
+    const armGesture = () => {
+      const onGesture = (event) => {
+        const target = event.target
+        if (target instanceof Element && target.closest('[data-sound-toggle]')) return
+        tryPlay().then((playing) => {
+          if (!playing) return
+          window.removeEventListener('pointerdown', onGesture, true)
+          window.removeEventListener('keydown', onGesture, true)
+        })
+      }
+      window.addEventListener('pointerdown', onGesture, true)
+      window.addEventListener('keydown', onGesture, true)
+      return () => {
+        window.removeEventListener('pointerdown', onGesture, true)
+        window.removeEventListener('keydown', onGesture, true)
+      }
     }
 
-    tryPlay()
-    window.addEventListener('pointerdown', onGesture, true)
-    window.addEventListener('keydown', onGesture, true)
+    tryPlay().then((playing) => {
+      if (cancelled || playing) return
+      removeGesture = armGesture()
+    })
+
     return () => {
-      window.removeEventListener('pointerdown', onGesture, true)
-      window.removeEventListener('keydown', onGesture, true)
+      cancelled = true
+      removeGesture()
     }
   }, [])
 
   function toggle() {
     const audio = audioRef.current
     if (!audio) return
-    if (wantSound.current && !audio.paused) {
+    if (started.current) {
       wantSound.current = false
+      started.current = false
       setOn(false)
       audio.pause()
       return
     }
     wantSound.current = true
     setOn(true)
-    const pending = audio.play()
-    if (pending) pending.catch(() => {})
+    audio
+      .play()
+      .then(() => {
+        if (!wantSound.current) {
+          audio.pause()
+          started.current = false
+          return
+        }
+        started.current = true
+      })
+      .catch(() => {
+        started.current = false
+      })
   }
 
   return (
-    <>
-      <audio ref={audioRef} src="/30dias.m4a" loop preload="auto" />
+    <div className="shrink-0">
+      <audio ref={audioRef} className="hidden" src="/30dias.m4a" loop preload="auto" />
       <button
         type="button"
         data-sound-toggle
         onClick={toggle}
         aria-pressed={on}
         aria-label={on ? 'Apagar sonido' : 'Encender sonido'}
-        className="shrink-0 rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold tracking-wide uppercase hover:bg-white/20"
+        className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold tracking-wide uppercase hover:bg-white/20"
       >
         {on ? 'Sonido on' : 'Sonido off'}
       </button>
-    </>
+    </div>
   )
 }
 
